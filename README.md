@@ -1,191 +1,280 @@
-# InsiEDR: Insider Threat Endpoint Detection & Response
+# InsiEDR Server: Central Intelligence & Threat Analytics Engine
 
-Welcome to **InsiEDR**, a sophisticated Endpoint Detection and Response (EDR) system engineered to detect, classify, and mitigate insider threats across a fleet of Windows endpoints. 
+[![Backend](https://img.shields.io/badge/Backend-FastAPI%20ASGI-009688.svg?style=flat&logo=fastapi)](https://fastapi.tiangolo.com)
+[![Frontend](https://img.shields.io/badge/Frontend-React%2019%20%2B%20TypeScript%20%2B%20Vite-61DAFB.svg?style=flat&logo=react)](https://react.dev)
+[![Python](https://img.shields.io/badge/Python-3.11+-3776AB.svg?style=flat&logo=python)](https://www.python.org)
+[![Database](https://img.shields.io/badge/Storage-PostgreSQL%2016%20%2B%20ClickHouse-336791.svg?style=flat&logo=postgresql)](https://www.postgresql.org)
+[![Cache](https://img.shields.io/badge/Cache-Redis%207-DC382D.svg?style=flat&logo=redis)](https://redis.io)
+[![Encryption](https://img.shields.io/badge/Telemetry-AES--256--GCM%20%2F%20HPKE-critical.svg)](https://en.wikipedia.org/wiki/Galois/Counter_Mode)
+[![Docker](https://img.shields.io/badge/Deploy-Docker%20Compose-2496ED.svg?style=flat&logo=docker)](https://www.docker.com)
+[![Agent](https://img.shields.io/badge/Agent-InsiEDR_Agent-blue.svg)](https://github.com/soms36-DefSec/InsiEDR_agent)
 
-InsiEDR leverages a multi-layered detection pipeline combining traditional deterministic heuristics with advanced Machine Learning—specifically, Isolation Forests, Random Vector Functional Link (RedRVFL) neural networks for temporal sequential modeling, and XGBoost for explicit threat scenario classification.
+**InsiEDR Server** is the central backend, analytics engine, and Security Operations Center (SOC) console for the **InsiEDR** platform. Engineered specifically to tackle **malicious insider threats, lateral movement, unauthorized data staging, and exfiltration**, InsiEDR blends deterministic rule heuristics with a multi-layered machine learning pipeline.
 
----
-
-## 1. System Architecture
-
-InsiEDR operates on a zero-trust **Client-Server architecture** designed to securely handle and analyze endpoint telemetry at scale.
-
-1. **The Agents (Endpoints)**: Lightweight Python agents deployed on target Windows machines. They continuously monitor system states using multiple specialized collectors:
-   - *File Collector*: Tracks bulk file access, modifications, and honeytoken/decoy file triggers.
-   - *Logon Collector*: Monitors logon events, tracking distinct machines accessed, login frequencies, and potential lateral movement.
-   - *Device Collector*: Detects anomalous USB drive insertions and hardware changes.
-   - *HTTP Collector*: Monitors network traffic volume, specifically looking for abnormal upload spikes indicating exfiltration.
-   All collected telemetry is encrypted locally via AES-GCM before being securely transmitted to the server.
-
-2. **The Backend Server**: A high-performance FastAPI (ASGI) application running behind Uvicorn. It receives, authenticates, and decrypts telemetry payloads, provides real-time Server-Sent Events (SSE), interactive OpenAPI 3.0 documentation, and chunked streaming data exports.
-
-3. **The Intelligence Pipeline (`ModelBridge`)**: The core analytical engine. Decrypted telemetry is immediately passed into a highly integrated, multi-stage detection pipeline (detailed below).
-
-4. **The PostgreSQL Database**: The centralized nervous system. All decrypted telemetry, parsed features, and resulting threat scores are safely persisted here for dashboard rendering and historical analysis.
-
-5. **The Analyst Dashboard**: A modern, dark-themed, responsive web interface that visualizes risk across the fleet, displaying temporal risk charts, radar breakdowns of domain risk (Logon, File, Device, HTTP), and live threat feeds.
+> 💡 **Looking for the endpoint sensor?** Check out the [InsiEDR Windows Agent](https://github.com/soms36-DefSec/InsiEDR_agent) for the 30+ telemetry collectors and client-side encryption modules.
 
 ---
 
-## 2. The Multi-Layered Intelligence Pipeline
+## 🏛️ System Architecture
 
-When telemetry arrives at the server, it passes through three distinct analytical engines to determine the risk level and threat scenario.
-
-### 2.1 The Anomaly Detector (Isolation Forest)
-The first layer is an **Isolation Forest** model (`iforest_model.pkl`). It is an unsupervised anomaly detection algorithm that treats normal behavior as the baseline. 
-- **Purpose**: To catch "unknown unknowns" or zero-day anomalous behaviors that don't fit explicit rules.
-- **Output**: Generates a base `overall_score` (0 to 100) and localized `domain_scores` pinpointing exactly which domain (File, Logon, Device, HTTP) is experiencing the anomaly.
-
-### 2.2 The Scenario Classifier (XGBoost)
-Telemetry features are then fed into a supervised **XGBoost Classifier** (`scenario_xgb.pkl`).
-- **Purpose**: To explicitly classify the exact *type* of threat occurring. 
-- **Output**: The model outputs a probability distribution across known threat scenarios (e.g., `s1`, `s2`, `s3`, `normal`). 
-
-### 2.3 The Temporal Sequence Modeler (RedRVFL)
-The outputs of the XGBoost model (the scenario probabilities) are injected back into the user's historical sequence of behaviors. This sequence is then fed into a **Random Vector Functional Link (RedRVFL) Network**.
-- **Purpose**: Traditional models look at single points in time. Insider threats (like data hoarding followed by exfiltration) play out over time. RedRVFL is designed to understand the *sequential temporal risk*.
-- **Output**: Produces a highly accurate, time-aware `behavioral_risk` score (0-100) and identifies the dominant `predicted_scenario` with a confidence percentage.
-
-### 2.4 The Deterministic Rules Engine (Heuristics)
-Machine learning is powerful, but deterministic rules are required for absolute certainty on known bad behaviors. The Heuristics engine runs in parallel:
-- **Logon Spikes & Lateral Movement**: Flags when a user logs into an abnormal number of distinct machines in a short window.
-- **Bulk File Collection**: Triggers when massive numbers of files are accessed or modified.
-- **Decoy Triggers**: Instant **CRITICAL** alerts if a user touches a known honeytoken or decoy file.
-- **Data Exfiltration**: Triggers on abnormal HTTP upload volumes.
-- **Output**: Deterministic, human-readable scenario tags (e.g., "🚨 Multi-PC Lateral Movement", "⚠️ Abnormal USB Activity") that override or supplement ML findings.
-
----
-
-## 3. Production Deployment Guide
-
-### 3.1 Python Environment Setup
-You can run InsiEDR using either Anaconda (`conda`) or standard Python Virtual Environments (`venv`). 
-
-**Using Conda (Recommended)**
-```bash
-conda create -n edr python=3.11 -y
-conda activate edr
+```
+┌────────────────────────────────────────────────────────────────────────┐
+│                        Windows Endpoints                               │
+│            (InsiEDR-Agent: 30+ Telemetry Collectors)                   │
+└───────────────────────────────────┬────────────────────────────────────┘
+                                    │ HTTPS / AES-256-GCM Encrypted JSON
+                                    ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                      InsiEDR Central Server                            │
+│                      (FastAPI / Uvicorn ASGI)                          │
+│                                                                        │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │                      1. Ingestion Layer                        │   │
+│   │   • Decryption (AES-256-GCM / HPKE)                            │   │
+│   │   • Replay Protection & Payload Validation                     │   │
+│   │   • Durable Task Worker Queue (8x Background Workers)          │   │
+│   └───────────────────────────────┬────────────────────────────────┘   │
+│                                   │                                    │
+│                                   ▼                                    │
+│   ┌────────────────────────────────────────────────────────────────┐   │
+│   │             2. Multi-Layered Intelligence Pipeline             │   │
+│   │                                                                │   │
+│   │  [Heuristics Engine]       [Isolation Forest]                  │   │
+│   │  Deterministic CERT Rules  Domain Outlier Scoring (0-100)      │   │
+│   │             │                             │                    │   │
+│   │             ▼                             ▼                    │   │
+│   │  [XGBoost Classifier]      [RedRVFL Sequence Modeler]          │   │
+│   │  Scenario Attribution      Temporal Behavioral Progression     │   │
+│   │             │                             │                    │   │
+│   │             └──────────────┬──────────────┘                    │   │
+│   │                            ▼                                   │   │
+│   │             [Composite Risk Aggregator]                        │   │
+│   │             Normalized Threat Score (0 - 100) & Severity       │   │
+│   └────────────────────────────┬───────────────────────────────────┘   │
+│                                │                                       │
+│                ┌───────────────┴───────────────┐                       │
+│                ▼                               ▼                       │
+│   ┌─────────────────────────┐     ┌─────────────────────────┐          │
+│   │   Dual-Storage Engine   │     │  Reactive Stream Engine │          │
+│   │ • PostgreSQL (Entities, │     │ • Server-Sent Events    │          │
+│   │   Baselines, Queues)    │     │ • /api/v1/stream/sse    │          │
+│   │ • ClickHouse (Analytics)│     │ • Real-time Threat Push │          │
+│   └─────────────────────────┘     └────────────┬────────────┘          │
+└────────────────────────────────────────────────┼───────────────────────┘
+                                                 │
+                                                 ▼
+┌────────────────────────────────────────────────────────────────────────┐
+│                   SOC Analyst Dashboard (React 19)                     │
+│    • Fleet KPIs  • Temporal Risk Graphs  • High-FPS Virtualized Logs   │
+└────────────────────────────────────────────────────────────────────────┘
 ```
 
-**Using Standard Python (venv)**
+---
+
+## 🧠 The 4-Tier Hybrid Detection Pipeline
+
+When encrypted telemetry is ingested, it is evaluated across four distinct analytical layers:
+
+```
+┌──────────────────────────────────────────────────────────────────────────────────────────────┐
+│ 1. Deterministic Heuristics Engine                                                          │
+│    • Flags non-negotiable threat indicators (Honeytoken trips, after-hours logon spikes,     │
+│      multi-PC lateral movement, abnormal mass file access, and USB exfiltration).            │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 2. Unsupervised Anomaly Detector (Isolation Forest)                                         │
+│    • Isolates statistical outliers without requiring prior attack labels.                    │
+│    • Outputs localized domain scores for Logon, File, Device, and HTTP vectors (0–100).      │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 3. Supervised Scenario Classifier (XGBoost)                                                  │
+│    • Maps multi-domain feature vectors into explicit threat scenarios derived from the CERT  │
+│      Insider Threat specification (IT Sabotage, IP Theft, Data Exfiltration).               │
+├──────────────────────────────────────────────────────────────────────────────────────────────┤
+│ 4. Temporal Sequence Modeler (RedRVFL / RandomLSTM)                                          │
+│    • Models behavioral progression over rolling multi-day time windows.                     │
+│    • Distinguishes transient isolated spikes from persistent, coordinated exfiltration.      │
+└──────────────────────────────────────────────────────────────────────────────────────────────┘
+```
+
+For detailed mathematical formulas and threshold specs, see the [Detection Pipeline Guide](docs/DETECTION_PIPELINE.md).
+
+---
+
+## 🖥️ SOC Analyst Dashboard (Frontend)
+
+The frontend is a dark-themed, high-performance Single-Page Application (SPA) built with **React 19, TypeScript, and Vite**, served directly by the FastAPI backend at `/dashboard/`:
+
+* **Executive Fleet KPI Grid**: Real-time breakdown of online/offline endpoints, active threat counts, and fleet risk severity distributions.
+* **Reactive Threat Feed**: Live chronological threat notifications pushed in real time via Server-Sent Events (SSE).
+* **Domain Risk Breakdown**: Multi-vector radar and timeline charts dissecting risk across Logon, File, Device, and HTTP channels.
+* **Forensic Drill-Down Drawer**: Deep-dive investigation view displaying user session history, baseline deviations, and decay indicators.
+* **Virtualized High-FPS Log Viewport**: Capable of scrolling through 100,000+ raw events at 60 FPS.
+* **Interactive API Documentation**: Embedded Swagger UI at `/docs` and ReDoc at `/redoc`.
+
+For frontend architecture and custom UI plugin development, see [frontend/README.md](frontend/README.md).
+
+---
+
+## 🔌 Extensibility & Plugin Architecture
+
+InsiEDR features dynamic plugin systems for both the backend and frontend:
+
+### Backend Threat Detector Plugins (`server/detectors/`)
+Subclass `Detector` to add custom analytical rules or external intelligence feeds:
+```python
+from server.detectors.base import Detector
+from server.detectors.registry import register_detector
+
+@register_detector
+class CloudStorageExfiltrationDetector(Detector):
+    @property
+    def name(self) -> str:
+        return "cloud_storage_exfiltration"
+
+    def detect(self, payload_id, agent_id, username, features, baseline, storage=None):
+        http_bytes = features.get("http_bytes_uploaded", 0)
+        if http_bytes > 500_000_000:  # 500MB
+            return self.format_result(
+                detector_name=self.name,
+                score=85.0,
+                is_anomaly=True,
+                reason="Mass outbound cloud storage transfer detected."
+            )
+        return self.format_result(detector_name=self.name, score=0.0, is_anomaly=False)
+```
+
+### Frontend UI Plugins (`frontend/src/plugins/`)
+Create custom visualizations, analyst playbooks, or SIEM connectors in React using `PluginProps` and `registerPlugin()`.
+
+---
+
+## 🚀 Deployment Guide
+
+### Option A: Docker Compose (Production Ready)
+
+The repository provides a turnkey multi-container deployment including PostgreSQL 16, Redis 7, ClickHouse 24.3, 3x FastAPI backend replicas, and an Nginx reverse proxy:
+
 ```bash
+# 1. Clone the repository
+git clone https://github.com/soms36-DefSec/InsiEDR_Server.git
+cd InsiEDR_Server
+
+# 2. Configure environment settings
+cp .env.example .env
+
+# 3. Launch the full cluster
+docker compose up -d --build
+
+# 4. Check cluster health
+docker compose ps
+```
+
+The services will be accessible at:
+* **Analyst Dashboard**: `http://localhost/dashboard/`
+* **API Documentation**: `http://localhost/docs`
+* **Telemetry Ingestion**: `http://localhost/api/logs`
+
+---
+
+### Option B: Local Bare-Metal Setup (Conda / venv)
+
+#### 1. Python Environment Setup
+```bash
+# Using Conda
+conda create -n insiedr python=3.11 -y
+conda activate insiedr
+
+# OR using standard venv
 python3 -m venv .venv
-source .venv/bin/activate
-```
+source .venv/bin/activate  # On Windows: .\.venv\Scripts\Activate.ps1
 
-**Installing Dependencies**
-```bash
+# Install core dependencies
 pip install -r requirements.txt
 pip install psycopg2-binary gunicorn
 ```
 
----
-
-### 3.2 PostgreSQL Database Setup
-1. Install **PostgreSQL** on your Linux server (e.g., `sudo apt install postgresql`).
-2. Log into the PostgreSQL prompt: `sudo -u postgres psql`
-3. Create a new user and database:
-   ```sql
-   CREATE USER myuser WITH PASSWORD 'mypassword';
-   CREATE DATABASE insiedr OWNER myuser;
-   ```
-
-Your database connection string will look like this: 
-`postgresql://myuser:mypassword@localhost:5432/insiedr`
-
----
-
-### 3.3 Backend Server Setup
-On the server machine, activate your Python environment (`conda activate edr`), and configure the necessary environment variables:
-
-```bash
-# 1. Database Connection String
-export INSIEDR_DATABASE_DSN="postgresql://myuser:mypassword@localhost:5432/insiedr"
-
-# 2. Server Secret Key
-export INSIEDR_SECRET_KEY="your-secure-random-string"
-
-# 3. 32-byte AES GCM key for telemetry encryption.
-# (Generate via: python3 -c "import os, base64; print(base64.b64encode(os.urandom(32)).decode())")
-export INSIEDR_AES_KEY="YOUR_BASE64_ENCODED_AES_KEY_HERE"
-
-# 4. Set Python path
-export PYTHONPATH="/path/to/InsiEDR"
+#### 2. PostgreSQL Database Setup
+```sql
+CREATE USER insiedr WITH PASSWORD 'insiedr_pass';
+CREATE DATABASE insiedr_db OWNER insiedr;
 ```
 
-**Running the Server:**
-Launch the server using Uvicorn ASGI server. The very first time it starts, it will automatically run SQL schema migrations to create all required tables.
+#### 3. Frontend Build (Optional if modifying UI)
+```bash
+cd frontend
+npm install
+npm run build
+cd ..
+```
+
+#### 4. Configure Environment Variables
+```bash
+export INSIEDR_DATABASE_DSN="postgresql://insiedr:insiedr_pass@localhost:5432/insiedr_db"
+export INSIEDR_SECRET_KEY="generate-a-secure-random-string"
+export INSIEDR_AES_KEY="YOUR_BASE64_ENCODED_32_BYTE_AES_KEY"
+export PYTHONPATH="."
+```
+
+#### 5. Launch the Server
+Database schema migrations run automatically on the first boot:
 ```bash
 uvicorn server.app:app --host 0.0.0.0 --port 5000 --workers 4
 ```
 
 ---
 
-### 3.4 Remote Agent Setup
-Agents must be installed on your remote endpoints. **The Agent does NOT need PostgreSQL.** It only needs Python and the exact same AES key as the server.
+## ⚙️ Configuration Reference
 
-On the **remote computer**, activate your Python environment and set:
-```powershell
-$env:INSIEDR_AGENT_SERVER = "http://YOUR_SERVER_IP:5000/api/logs"
-$env:INSIEDR_AES_KEY = "YOUR_BASE64_ENCODED_AES_KEY_HERE"
-$env:INSIEDR_ALLOW_INSECURE_HTTP = "1"
-$env:INSIEDR_AGENT_MODE = "production"
-$env:PYTHONPATH = "C:\Path\To\InsiEDR"
-```
-
-**Installing as a Background Service:**
-To ensure the agent runs silently and starts on reboot, run the installer script from an **Administrator PowerShell prompt**:
-```powershell
-cd C:\Path\To\InsiEDR
-.\scripts\windows\install_agent_task.bat
-```
-
-*(To test manually in the foreground before installing: `python -m agent.main`)*
-
-### 3.5 The Analyst Dashboard
-With the server and agents running, open a web browser to:
-`http://localhost:5000/dashboard/`
-
-The dashboard is a modern React 19 + TypeScript Single-Page Application (SPA) providing:
-- **Real-Time Reactive Streaming**: Backed by Server-Sent Events (SSE) at `/api/v1/stream/sse` with adaptive jittered fallback.
-- **Executive Fleet KPI Grid**: Real-time breakdown of online/offline endpoints and risk severity tiers.
-- **Interactive Risk Timeline & Charts**: Visual temporal progression and risk distribution curves.
-- **Forensic Drill-Down Drawer**: Deep-dive inspection of user activity timelines, scenario attributions, and threat decay indicators.
-- **Virtualized High-FPS Telemetry Viewport**: Renders 100,000+ raw events at silky 60 FPS.
-- **Interactive OpenAPI Documentation**: Available at `http://localhost:5000/docs` (Swagger UI) and `http://localhost:5000/redoc` (ReDoc).
+| Environment Variable | Default | Description |
+| :--- | :--- | :--- |
+| `INSIEDR_DATABASE_DSN` | *(Required)* | PostgreSQL connection string (`postgresql://user:pass@host:5432/db`). |
+| `INSIEDR_AES_KEY` | *(Required)* | 32-byte key for decrypting agent telemetry payloads. |
+| `INSIEDR_SECRET_KEY` | *(Required)* | Secret key used for signing session tokens and internal payloads. |
+| `REDIS_URL` | `redis://localhost:6379/0` | Redis instance for pub/sub event caching and session management. |
+| `CLICKHOUSE_ENABLED` | `false` | Enable high-throughput columnar storage for raw event telemetry. |
+| `CLICKHOUSE_HOST` | `localhost` | ClickHouse host address. |
+| `ENABLE_MODEL_PIPELINE` | `true` | Enable ML model inference (Isolation Forest, XGBoost, RedRVFL). |
+| `PORT` | `5000` | Port for the ASGI server. |
+| `LOG_LEVEL` | `INFO` | Logging level (`DEBUG`, `INFO`, `WARNING`, `ERROR`). |
 
 ---
 
-## 4. Extensibility & Plugin Architecture
+## 📡 REST & Streaming API Summary
 
-InsiEDR is engineered from the ground up for modularity and team collaboration across both backend and frontend:
+| Method | Endpoint | Description |
+| :--- | :--- | :--- |
+| `POST` | `/api/logs` | Ingests encrypted telemetry envelopes from remote agents. |
+| `GET` | `/api/v1/stream/sse` | Real-time Server-Sent Events stream for SOC dashboard. |
+| `GET` | `/api/threats` | Paginated query endpoint for filtered threat events. |
+| `GET` | `/api/anomalies` | Query detected statistical baseline anomalies. |
+| `GET` | `/api/agents` | Status and health tracking of registered endpoints. |
+| `GET` | `/api/baseline` | Statistical user baseline profiles. |
+| `GET` | `/api/export/logs` | Streaming export of telemetry in CSV or NDJSON format. |
+| `GET` | `/api/health` | Comprehensive health check across database, ML, and cache. |
+| `GET` | `/docs` | Interactive Swagger UI API documentation. |
 
-### 4.1 Backend Threat Detector Plugins (`server/detectors/`)
-Create custom detectors (e.g. LLM-based reasoning, behavioral rules, or network graph analytics) by subclassing `Detector`:
-```python
-from server.detectors.base import Detector
-from server.detectors.registry import register_detector
+For complete request/response schemas, see the [API Specification](docs/API_SPECIFICATION.md).
 
-@register_detector
-class CustomNetworkAnomalyDetector(Detector):
-    @property
-    def name(self) -> str:
-        return "custom_network_anomaly"
+---
 
-    def detect(self, payload_id, agent_id, username, features, baseline, storage=None):
-        # Your custom detection logic here
-        return self.format_result(
-            detector_name=self.name,
-            score=75.0,
-            is_anomaly=True,
-            reason="Unusual outbound network burst."
-        )
+## 🧪 Testing
+
+Execute test suites for detection plugins, cryptographic adapters, storage layers, and FastAPI routes:
+```bash
+pytest tests/ -v
 ```
 
-### 4.2 Frontend Security Tool Plugins (`frontend/src/plugins/`)
-Create new analyst views, threat hunting tools, or playbook automations in React:
-1. Copy `frontend/src/plugins/template/PluginTemplate.tsx`.
-2. Implement your component using uniform `PluginProps` (`summary`, `agents`, `riskEvents`, `onDrillDown`).
-3. Register in `frontend/src/plugins/index.ts` with `registerPlugin(MyPlugin)`.
-For full frontend documentation, see [`frontend/README.md`](frontend/README.md).
+---
 
+## 📚 Technical Documentation
+
+* [System Architecture & Data Flow](docs/ARCHITECTURE.md)
+* [API Specification & Protocols](docs/API_SPECIFICATION.md)
+* [Detection Pipeline & Scoring Mathematics](docs/DETECTION_PIPELINE.md)
+* [Frontend Developer & Plugin Guide](frontend/README.md)
+* [Deterministic Heuristics Engine](heuristics/README_heuristics.md)
+
+---
+
+## 🔗 Related Repositories
+
+* **[InsiEDR Windows Agent](https://github.com/soms36-DefSec/InsiEDR_agent)** — The endpoint telemetry sensor, collector plugins, and client-side encryption framework.

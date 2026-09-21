@@ -1,0 +1,10 @@
+BEGIN;
+
+CREATE TABLE IF NOT EXISTS training_labels (
+    agent_id TEXT PRIMARY KEY REFERENCES agents(agent_id),
+    is_malicious BOOLEAN NOT NULL DEFAULT FALSE,
+    labeled_at TIMESTAMP WITH TIME ZONE DEFAULT CURRENT_TIMESTAMP,
+    labeled_by TEXT
+);
+
+COMMIT;

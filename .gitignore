@@ -1,0 +1,55 @@
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+.pytest_cache/
+.mypy_cache/
+.ruff_cache/
+.coverage
+htmlcov/
+
+# Virtual environments
+.venv/
+venv/
+env/
+ENV/
+
+# Local environment and secrets
+# .env (Commented out so it can be pushed for deployment)
+# .env.*
+!.env.example
+*.key
+*.pem
+*.crt
+*.p12
+*.pfx
+
+# InsiEDR local runtime data
+insiedr_demo.db
+*.db
+*.sqlite
+*.sqlite3
+.insiedr_queue/
+/agent_queue/
+/queue/
+
+# Generated reports and dumps
+full_repo_dump.txt
+reports/
+.dist/
+dist/
+build/
+
+# Logs
+*.log
+logs/
+
+# OS/editor noise
+.DS_Store
+Thumbs.db
+desktop.ini
+.vscode/
+.idea/
+
+# Large raw datasets
+model/INPUT_LOGS/
